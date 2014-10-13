@@ -1,22 +1,59 @@
 use std::io::{TcpListener, TcpStream};
 use std::io::{Acceptor, Listener};
-use std::str;
 
 
 fn handle_client(mut tcp_stream: TcpStream) {
-    let mut buffer:[u8, ..1024] = [0, ..1024];
-
     loop {
-        tcp_stream.read(buffer);
-        let s = match str::from_utf8(buffer) {
-            None => {
-                println!("Dude went away")
-                break;
-            },
-            Some(e) => e,
-        };
-        println!("Got -> {}", s);
+        let version = tcp_stream.read_le_uint_n(1);
+        match version {
+            Err(_) => break,
+            Ok(v) => if v == 5 {
+                let num_methods = tcp_stream.read_le_uint_n(1);
+                match num_methods {
+                    Err(e) => println!("Died due to {}", e),
+                    Ok(num) => {
+                        println!("Process command {}", num);
+                        let methods = tcp_stream.read_le_uint_n(num as uint);
+                        println!("Process command {} {}", num_methods, methods);
+                        tcp_stream.write_le_uint(5);
+                        tcp_stream.write_le_uint(0);
+                    }
+                }
+            } else {
+                drop(tcp_stream);
+                break
+            }
+        }
+
+        let command = tcp_stream.read_le_uint_n(1);
+
+        match command {
+            Err(e) => println!("Died due to {}", e),
+            Ok(c) => {
+                println!("Process command {}", c);
+                let port = tcp_stream.read_le_uint_n(4);
+                println!("Port {}", port);
+                let ip = tcp_stream.read_le_uint_n(4);
+                println!("Ip {}", ip);
+                // process_command(c, &mut tcp_stream)
+            }
+        }
     }
+}
+
+fn process_command(command: u64, tcp_stream: &mut TcpStream) {
+    println!("Command {} {}", command, command == 1u64);
+
+    if command == 1u64 {
+        let port = (*tcp_stream).read_le_uint_n(4);
+        println!("Port {}", port);
+        let ip = (*tcp_stream).read_le_uint_n(4);
+        println!("Ip {}", ip);
+    } else {
+        println!("Some other command {}", command)
+    }
+
+    println!("Got command {}", command)
 }
 
 fn main() {
