@@ -2,7 +2,7 @@ use std::io::{TcpListener, TcpStream};
 use std::io::{Acceptor, Listener, IoError, IoResult};
 use std::io::util::copy;
 use std::io::net::addrinfo::get_host_addresses;
-use std::io::net::ip::{Ipv4Addr, SocketAddr};
+use std::io::net::ip::{IpAddr, Ipv4Addr, SocketAddr};
 use std::time::duration::Duration;
 
 
@@ -61,6 +61,13 @@ fn handle_client(mut tcp_stream: TcpStream) -> Result<(), IoError> {
     return Ok(())
 }
 
+fn resolve_addr_with_cache(hostname: &str) -> Result<Vec<IpAddr>, String> {
+    match get_host_addresses(hostname) {
+        Ok(a) => { return Ok(a) },
+        _ => { return Err("Done with this".to_string()) }
+    };
+}
+
 fn get_remote_addr(tcp_stream: &mut TcpStream, addr_type: u64) -> IoResult<SocketAddr> {
     match addr_type {
         1 => {
@@ -76,7 +83,10 @@ fn get_remote_addr(tcp_stream: &mut TcpStream, addr_type: u64) -> IoResult<Socke
             let port = try!(tcp_stream.read_be_uint_n(2)).to_u16().unwrap();
 
             let hostname = match String::from_utf8(hostname_vec) { Ok(s) => s, _ => "".to_string() };
-            let addresses = try!(get_host_addresses(hostname.as_slice()));
+            let addresses = match resolve_addr_with_cache(hostname.as_slice()) {
+                Ok(a) => a,
+                _ => return Err(IoError::last_error())
+            };
 
             if addresses.is_empty() {
                 return Err(IoError::last_error())
@@ -87,7 +97,6 @@ fn get_remote_addr(tcp_stream: &mut TcpStream, addr_type: u64) -> IoResult<Socke
         },
         _ => return Err(IoError::last_error())
     }
-
 }
 
 fn process_command(command: u64, tcp_stream: &mut TcpStream) {
@@ -116,7 +125,6 @@ fn main() {
                 println!("There was an error omg {}", e)
             }
             Ok(stream) => spawn(proc() {
-                println!("Spawned a thing")
                 handle_client(stream);
             })
         }
