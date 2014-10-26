@@ -4,9 +4,12 @@ use std::io::util::copy;
 use std::io::net::addrinfo::get_host_addresses;
 use std::io::net::ip::{IpAddr, Ipv4Addr, SocketAddr};
 use std::time::duration::Duration;
+use logger::Logger;
+
+mod logger;
 
 
-fn handle_client(mut tcp_stream: TcpStream) -> Result<(), IoError> {
+fn handle_client(mut tcp_stream: TcpStream, logger: Logger) -> Result<(), IoError> {
     loop {
         let version = tcp_stream.read_le_uint_n(1);
         match version {
@@ -29,7 +32,7 @@ fn handle_client(mut tcp_stream: TcpStream) -> Result<(), IoError> {
         let res = try!(tcp_stream.read_le_uint_n(1));
         let addr_type = try!(tcp_stream.read_le_uint_n(1));
 
-        let addr = try!(get_remote_addr(&mut tcp_stream, addr_type));
+        let addr = try!(get_remote_addr(&mut tcp_stream, addr_type, &logger));
         
         println!("Process command {}", c);
         println!("res {}", res);
@@ -68,7 +71,7 @@ fn resolve_addr_with_cache(hostname: &str) -> Result<Vec<IpAddr>, String> {
     };
 }
 
-fn get_remote_addr(tcp_stream: &mut TcpStream, addr_type: u64) -> IoResult<SocketAddr> {
+fn get_remote_addr(tcp_stream: &mut TcpStream, addr_type: u64, logger: &Logger) -> IoResult<SocketAddr> {
     match addr_type {
         1 => {
             let ip = try!(tcp_stream.read_exact(4));
@@ -83,6 +86,7 @@ fn get_remote_addr(tcp_stream: &mut TcpStream, addr_type: u64) -> IoResult<Socke
             let port = try!(tcp_stream.read_be_uint_n(2)).to_u16().unwrap();
 
             let hostname = match String::from_utf8(hostname_vec) { Ok(s) => s, _ => "".to_string() };
+            logger.log(&hostname);
             let addresses = match resolve_addr_with_cache(hostname.as_slice()) {
                 Ok(a) => a,
                 _ => return Err(IoError::last_error())
@@ -116,16 +120,18 @@ fn process_command(command: u64, tcp_stream: &mut TcpStream) {
 
 fn main() {
     let listener = TcpListener::bind("127.0.0.1", 1080);
+    let logger = Logger::new();
 
     let mut acceptor = listener.listen();
 
     for stream in acceptor.incoming() {
+        let cloned_logger = logger.clone();
         match stream {
             Err(e) => {
                 println!("There was an error omg {}", e)
             }
             Ok(stream) => spawn(proc() {
-                handle_client(stream);
+                handle_client(stream, cloned_logger);
             })
         }
     }
