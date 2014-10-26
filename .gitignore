@@ -1,2 +1,2 @@
-forwarder
-server
+target/*
+urls.txt
