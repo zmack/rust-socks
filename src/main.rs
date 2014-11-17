@@ -1,3 +1,4 @@
+use std::os;
 use std::io::{TcpListener, TcpStream};
 use std::io::{Acceptor, Listener, IoError, IoResult};
 use std::io::util::copy;
@@ -5,8 +6,10 @@ use std::io::net::addrinfo::get_host_addresses;
 use std::io::net::ip::{IpAddr, Ipv4Addr, SocketAddr};
 use std::time::duration::Duration;
 use logger::Logger;
+use configuration::Configuration;
 
 mod logger;
+mod configuration;
 
 
 fn handle_client(mut tcp_stream: TcpStream, logger: Logger) -> Result<(), IoError> {
@@ -119,7 +122,27 @@ fn process_command(command: u64, tcp_stream: &mut TcpStream) {
 }
 
 fn main() {
-    let listener = TcpListener::bind("127.0.0.1", 1080);
+    let args = os::args();
+    match args.len() {
+        2 => {
+            let listen_ip = args[1];
+            let port:u16 = 1080;
+        },
+        3 => {
+            let listen_ip = args[1];
+            let port:u16 = from_str(args[2].as_slice()).unwrap();
+        },
+        _ => {
+            let listen_ip = "127.0.0.1".to_string();
+            let port:u16 = 1080;
+        },
+    };
+    let configuration = Configuration::new(Path::new("proxy.conf"));
+    println!("whitelist -> {}", configuration.whitelisted_ips);
+    println!("{} <-", os::args());
+    let listener = TcpListener::bind(
+                            configuration.listen_ip.as_slice(),
+                            configuration.listen_port);
     let logger = Logger::new();
 
     let mut acceptor = listener.listen();
@@ -128,7 +151,7 @@ fn main() {
         let cloned_logger = logger.clone();
         match stream {
             Err(e) => {
-                println!("There was an error omg {}", e)
+                fail!("There was an error omg {}", e)
             }
             Ok(stream) => spawn(proc() {
                 handle_client(stream, cloned_logger);
