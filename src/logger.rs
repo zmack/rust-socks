@@ -38,9 +38,3 @@ impl Logger {
         file.flush();
     }
 }
-
-
-#[test]
-fn can_initialize() {
-    let logger = Logger::new();
-}

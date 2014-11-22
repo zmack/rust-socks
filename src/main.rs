@@ -1,4 +1,6 @@
 use std::os;
+use std::{io, error};
+use std::error::FromError;
 use std::io::{TcpListener, TcpStream};
 use std::io::{Acceptor, Listener, IoError, IoResult};
 use std::io::util::copy;
@@ -6,13 +8,31 @@ use std::io::net::addrinfo::get_host_addresses;
 use std::io::net::ip::{IpAddr, Ipv4Addr, SocketAddr};
 use std::time::duration::Duration;
 use logger::Logger;
+use client_tracker::ClientTracker;
 use configuration::Configuration;
 
 mod logger;
 mod configuration;
+mod client_tracker;
 
+enum RocksError {
+    Io(IoError),
+    Generic(String)
+}
 
-fn handle_client(mut tcp_stream: TcpStream, logger: Logger) -> Result<(), IoError> {
+impl FromError<IoError> for RocksError {
+    fn from_error(err: IoError) -> RocksError {
+        RocksError::Io(err)
+    }
+}
+
+impl FromError<String> for RocksError {
+    fn from_error(string: String) -> RocksError {
+        Generic(string)
+    }
+}
+
+fn handle_client(mut tcp_stream: TcpStream, logger: Logger, tracker: &ClientTracker) -> Result<(), RocksError> {
     loop {
         let version = tcp_stream.read_le_uint_n(1);
         match version {
@@ -23,7 +43,6 @@ fn handle_client(mut tcp_stream: TcpStream, logger: Logger) -> Result<(), IoErro
                 let methods = try!(tcp_stream.read_be_uint_n(num_methods as uint));
                 println!("Process command poo {} {:X}", num_methods, methods);
                 tcp_stream.write([5, 0]);
-                //tcp_stream.write_le_uint(0);
             } else {
                 drop(tcp_stream);
                 break
@@ -49,6 +68,7 @@ fn handle_client(mut tcp_stream: TcpStream, logger: Logger) -> Result<(), IoErro
         let mut client_reader = tcp_stream.clone();
         let mut socket_writer = outbound.clone();
 
+        tracker.increment();
         println!("Started copy");
         spawn(proc() {
             let res_2 = copy(&mut client_reader, &mut socket_writer);
@@ -74,7 +94,7 @@ fn resolve_addr_with_cache(hostname: &str) -> Result<Vec<IpAddr>, String> {
     };
 }
 
-fn get_remote_addr(tcp_stream: &mut TcpStream, addr_type: u64, logger: &Logger) -> IoResult<SocketAddr> {
+fn get_remote_addr(tcp_stream: &mut TcpStream, addr_type: u64, logger: &Logger) -> Result<SocketAddr, RocksError> {
     match addr_type {
         1 => {
             let ip = try!(tcp_stream.read_exact(4));
@@ -90,19 +110,16 @@ fn get_remote_addr(tcp_stream: &mut TcpStream, addr_type: u64, logger: &Logger) 
 
             let hostname = match String::from_utf8(hostname_vec) { Ok(s) => s, _ => "".to_string() };
             logger.log(&hostname);
-            let addresses = match resolve_addr_with_cache(hostname.as_slice()) {
-                Ok(a) => a,
-                _ => return Err(IoError::last_error())
-            };
+            let addresses = try!(resolve_addr_with_cache(hostname.as_slice()));
 
             if addresses.is_empty() {
-                return Err(IoError::last_error())
+                return Err(FromError::from_error("Empty Address".to_string()))
             } else {
                 println!("Resolution succeeded for {} - {}", hostname, addresses);
                 return Ok(SocketAddr{ ip: addresses[0], port: port });
             }
         },
-        _ => return Err(IoError::last_error())
+        _ => return Err(FromError::from_error("Invalid Address Type".to_string()))
     }
 }
 
@@ -111,38 +128,36 @@ fn process_command(command: u64, tcp_stream: &mut TcpStream) {
 
     if command == 1u64 {
         let port = (*tcp_stream).read_le_uint_n(4);
-        println!("Port {}", port);
         let ip = (*tcp_stream).read_le_uint_n(4);
-        println!("Ip {}", ip);
     } else if command == 2u64 {
         println!("Some other command {}", command)
     }
-
-    println!("Got command {}", command)
 }
 
 fn main() {
     let args = os::args();
+    let bind_address:&str;
+
     match args.len() {
         2 => {
-            let listen_ip = args[1];
-            let port:u16 = 1080;
-        },
-        3 => {
-            let listen_ip = args[1];
-            let port:u16 = from_str(args[2].as_slice()).unwrap();
+            bind_address = args[1].as_slice();
         },
         _ => {
-            let listen_ip = "127.0.0.1".to_string();
-            let port:u16 = 1080;
+            bind_address = "127.0.0.1";
         },
     };
     let configuration = Configuration::new(Path::new("proxy.conf"));
     println!("whitelist -> {}", configuration.whitelisted_ips);
     println!("{} <-", os::args());
-    let listener = TcpListener::bind(
-                            configuration.listen_ip.as_slice(),
-                            configuration.listen_port);
+    let mut listener = TcpListener::bind(bind_address).unwrap();
+    let socket_name = match listener.socket_name() {
+        Ok(s) => s,
+        _ => {
+            println!("Error getting socket name");
+            return
+        }
+    };
+    println!("Listening on {}", socket_name);
     let logger = Logger::new();
 
     let mut acceptor = listener.listen();
@@ -151,10 +166,10 @@ fn main() {
         let cloned_logger = logger.clone();
         match stream {
             Err(e) => {
-                fail!("There was an error omg {}", e)
+                println!("There was an error omg {}", e)
             }
             Ok(stream) => spawn(proc() {
-                handle_client(stream, cloned_logger);
+                handle_client(stream, cloned_logger, &ClientTracker::new("food".to_string()));
             })
         }
     }

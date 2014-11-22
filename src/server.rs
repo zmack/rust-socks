@@ -4,6 +4,8 @@ use std::io::util::copy;
 use std::io::net::addrinfo::get_host_addresses;
 use std::io::net::ip::{IpAddr, Ipv4Addr, SocketAddr};
 use std::time::duration::Duration;
+
+use client_tracker;
 use logger;
 
 
@@ -126,6 +128,7 @@ fn main() {
                 println!("There was an error omg {}", e)
             }
             Ok(stream) => spawn(proc() {
+                let tracker = ClientTracker::new("goofy");
                 handle_client(stream);
             })
         }
