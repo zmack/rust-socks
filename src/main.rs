@@ -28,7 +28,7 @@ impl FromError<IoError> for RocksError {
 
 impl FromError<String> for RocksError {
     fn from_error(string: String) -> RocksError {
-        Generic(string)
+        RocksError::Generic(string)
     }
 }
 
@@ -42,7 +42,7 @@ fn handle_client(mut tcp_stream: TcpStream, logger: Logger, tracker: &ClientTrac
                 println!("Process command num {}", num_methods);
                 let methods = try!(tcp_stream.read_be_uint_n(num_methods as uint));
                 println!("Process command poo {} {:X}", num_methods, methods);
-                tcp_stream.write([5, 0]);
+                tcp_stream.write(&[5, 0]);
             } else {
                 drop(tcp_stream);
                 break

@@ -53,7 +53,7 @@ impl ClientTracker {
         }
     }
 
-    pub fn increment(self) {
+    pub fn increment(&self) {
         println!("Increment!");
     }
 }
