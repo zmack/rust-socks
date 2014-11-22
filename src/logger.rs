@@ -22,14 +22,14 @@ impl Logger {
     }
 
     pub fn log(&self, message: &String) {
-        self.sender.send(Log(message.clone()));
+        self.sender.send(Msg::Log(message.clone()));
     }
 
     fn perform_logging(rx: Receiver<Msg>) {
         let mut file = File::create(&Path::new("urls.txt"));
         loop {
             match rx.recv() {
-                Log(message) => {
+                Msg::Log(message) => {
                     println!("Got {}", message);
                     file.write_line(message.as_slice());
                 }
