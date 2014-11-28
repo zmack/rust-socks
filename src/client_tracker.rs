@@ -14,12 +14,14 @@ pub struct ClientTracker {
 }
 
 pub struct ClientTrackers {
+    num_trackers: u64,
     trackers: HashMap<String, ClientTracker>
 }
 
 impl ClientTrackers {
     pub fn new() -> ClientTrackers{
         ClientTrackers {
+            num_trackers: 0,
             trackers: HashMap::new()
         }
     }
@@ -39,6 +41,8 @@ impl ClientTrackers {
     }
 
     pub fn add_tracker(&mut self, client: String, tracker: ClientTracker) {
+        self.num_trackers += 1;
+        println!("Trackers {}", self.num_trackers);
         self.trackers.insert(client, tracker);
     }
 }

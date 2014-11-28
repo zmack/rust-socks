@@ -8,7 +8,7 @@ use std::io::net::addrinfo::get_host_addresses;
 use std::io::net::ip::{IpAddr, Ipv4Addr, SocketAddr};
 use std::time::duration::Duration;
 use logger::Logger;
-use client_tracker::ClientTracker;
+use client_tracker::{ClientTracker, ClientTrackers};
 use configuration::Configuration;
 
 mod logger;
@@ -159,6 +159,7 @@ fn main() {
     };
     println!("Listening on {}", socket_name);
     let logger = Logger::new();
+    let mut trackers = ClientTrackers::new();
 
     let mut acceptor = listener.listen();
 
@@ -168,9 +169,12 @@ fn main() {
             Err(e) => {
                 println!("There was an error omg {}", e)
             }
-            Ok(stream) => spawn(proc() {
-                handle_client(stream, cloned_logger, &ClientTracker::new("food".to_string()));
-            })
+            Ok(stream) => {
+                let tracker = trackers.get("Hello".to_string());
+                spawn(proc() {
+                    handle_client(stream, cloned_logger, &tracker);
+                })
+            }
         }
     }
 
