@@ -6,6 +6,10 @@ enum Msg {
 
 }
 
+enum ClientTrackersMsg {
+    Get(String),
+}
+
 #[deriving(Clone)]
 pub struct ClientTracker {
     client: String,
@@ -13,14 +17,51 @@ pub struct ClientTracker {
     sender: Sender<Msg>
 }
 
+#[deriving(Clone)]
 pub struct ClientTrackers {
+    sender: Sender<ClientTrackersMsg>
+}
+
+impl ClientTrackers {
+    pub fn new() -> ClientTrackers {
+        let (tx, rx) = channel();
+
+        spawn(proc() {
+            ClientTrackers::serve(rx);
+        });
+
+        ClientTrackers {
+            sender: tx
+        }
+    }
+
+    fn serve(rx: Receiver<ClientTrackersMsg>) {
+        let mut trackers = ClientTrackersInner::new();
+
+        loop {
+            match rx.recv() {
+                ClientTrackersMsg::Get(key) => {
+                    let tracker = trackers.get(key);
+                    tracker.increment();
+                }
+            }
+        }
+    }
+
+    pub fn track(&self, key: &String) {
+        self.sender.send(ClientTrackersMsg::Get(key.clone()));
+    }
+}
+
+
+struct ClientTrackersInner {
     num_trackers: u64,
     trackers: HashMap<String, ClientTracker>
 }
 
-impl ClientTrackers {
-    pub fn new() -> ClientTrackers{
-        ClientTrackers {
+impl ClientTrackersInner {
+    pub fn new() -> ClientTrackersInner {
+        ClientTrackersInner {
             num_trackers: 0,
             trackers: HashMap::new()
         }

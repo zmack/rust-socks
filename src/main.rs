@@ -38,7 +38,7 @@ impl FromError<String> for RocksError {
     }
 }
 
-fn authenticate(tcp_stream: &mut TcpStream) -> Result<(), RocksError> {
+fn authenticate(tcp_stream: &mut TcpStream, trackers: &ClientTrackers) -> Result<(), RocksError> {
     let version = try!(tcp_stream.read_u8());
     if version != 1 {
         return Err(FromError::from_error("Wrong version".to_string()))
@@ -50,6 +50,8 @@ fn authenticate(tcp_stream: &mut TcpStream) -> Result<(), RocksError> {
     let password_bytes = try!(tcp_stream.read_exact(password_len as uint));
     let password = try!(String::from_utf8(password_bytes));
 
+    trackers.track(&username);
+
     // Success
     tcp_stream.write(&[1, 0]);
 
@@ -58,7 +60,7 @@ fn authenticate(tcp_stream: &mut TcpStream) -> Result<(), RocksError> {
     Ok(())
 }
 
-fn handle_client(mut tcp_stream: TcpStream, logger: Logger) -> Result<(), RocksError> {
+fn handle_client(mut tcp_stream: TcpStream, logger: Logger, trackers: ClientTrackers) -> Result<(), RocksError> {
     loop {
         let version = try!(tcp_stream.read_u8());
         if version == 5 {
@@ -69,7 +71,7 @@ fn handle_client(mut tcp_stream: TcpStream, logger: Logger) -> Result<(), RocksE
             if methods.contains(&2) {
                 // Authenticated
                 tcp_stream.write(&[5, 2]);
-                try!(authenticate(&mut tcp_stream));
+                try!(authenticate(&mut tcp_stream, &trackers));
             } else {
                 // Unauthenticated
                 tcp_stream.write(&[5, 0]);
@@ -122,7 +124,7 @@ fn resolve_addr_with_cache(hostname: &str) -> Result<Vec<IpAddr>, String> {
     };
 }
 
-fn get_remote_addr(tcp_stream: &mut TcpStream, addr_type: u64, logger: &Logger) -> Result<SocketAddr, RocksError> {
+fn get_remote_addr(tcp_stream: &mut TcpStream, addr_type: u8, logger: &Logger) -> Result<SocketAddr, RocksError> {
     match addr_type {
         1 => {
             let ip = try!(tcp_stream.read_exact(4));
@@ -187,19 +189,20 @@ fn main() {
     };
     println!("Listening on {}", socket_name);
     let logger = Logger::new();
-    let mut trackers = ClientTrackers::new();
+    let trackers = ClientTrackers::new();
 
     let mut acceptor = listener.listen();
 
     for stream in acceptor.incoming() {
         let cloned_logger = logger.clone();
+        let cloned_trackers = trackers.clone();
         match stream {
             Err(e) => {
                 println!("There was an error omg {}", e)
             }
             Ok(stream) => {
                 spawn(proc() {
-                    handle_client(stream, cloned_logger);
+                    handle_client(stream, cloned_logger, cloned_trackers);
                 })
             }
         }
