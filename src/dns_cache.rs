@@ -7,12 +7,12 @@ use std::fmt;
 
 
 #[deriving(Clone)]
-struct ExecutionPool<'a, T> {
+struct ExecutionPool {
     sender: Sender<proc():Send>
 }
 
-impl<'a, T:Send<T>> ExecutionPool<'a, T> {
-    pub fn new<'a, T>(size: uint) -> ExecutionPool<'a, T> {
+impl ExecutionPool {
+    pub fn new(size: uint) -> ExecutionPool {
         let (tx, rx) = channel::<proc():Send>();
         let receiver = Arc::new(Mutex::new(rx));
 
@@ -24,7 +24,6 @@ impl<'a, T:Send<T>> ExecutionPool<'a, T> {
                 loop {
                     match cloned_rx.lock().recv_opt() {
                         Ok(x) => {
-                            println!("Got a message on {}", thread_id);
                             x();
                         },
                         _ => {},
@@ -38,20 +37,8 @@ impl<'a, T:Send<T>> ExecutionPool<'a, T> {
         }
     }
 
-    pub fn exec<T:Send<T>>(&self, fun:proc()) -> Result<T,String> {
-        let (tx, rx) = channel();
-
-        let my_proc:proc():Send = proc() {
-            let res = fun();
-            tx.send(res);
-        };
-
-        self.sender.send(my_proc);
-
-        match rx.recv_opt() {
-            Ok(x) => { return Ok(x) },
-            _ => Err("Dead".to_string())
-        }
+    pub fn exec(&self, fun:proc():Send) {
+        self.sender.send(fun);
     }
 }
 
@@ -59,10 +46,13 @@ fn main() {
     let pool = ExecutionPool::new(10);
 
     for i in range(1u, 1_000u) {
-        pool.exec(proc() -> int {
+        let (tx, rx) = channel::<uint>();
+        pool.exec(proc() {
             println!("Hello");
-            1
+            tx.send(10);
         });
+
+        println!("Done with {} -> {}", i, rx.recv());
     }
 }
 
