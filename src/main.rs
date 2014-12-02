@@ -30,7 +30,7 @@ fn main() {
             bind_address = "127.0.0.1";
         },
     };
-    let configuration = Configuration::new(Path::new("proxy.conf"));
+    let configuration = Configuration::new();
     println!("whitelist -> {}", configuration.whitelisted_ips);
     println!("{} <-", os::args());
     let mut listener = TcpListener::bind(bind_address).unwrap();

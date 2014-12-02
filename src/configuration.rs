@@ -2,48 +2,79 @@ use std::io::File;
 use std::io::BufferedReader;
 use std::io::net::ip::{IpAddr, Ipv4Addr, SocketAddr};
 
+pub struct User {
+    username: String,
+    password_hash: String
+}
+
 pub struct Configuration {
     pub whitelisted_ips: Vec<IpAddr>,
+    pub user_accounts: Vec<User>,
     pub listen_ip: String,
     pub listen_port: u16,
 }
 
 impl Configuration {
-    pub fn new(filename: Path) -> Configuration {
-        let file = match File::open(&filename) {
+    pub fn new() -> Configuration {
+        let configuration = match Configuration::parse_configuration() {
             Ok(f) => f,
-            _ => return Configuration {
+            _ => Configuration {
                 whitelisted_ips: Vec::new(),
+                user_accounts: Vec::new(),
                 listen_ip: "127.0.0.1".to_string(),
                 listen_port: 1080
             }
         };
 
-        return Configuration {
-            whitelisted_ips: Configuration::get_whitelisted_ips(file),
+        return configuration
+    }
+
+    fn parse_configuration() -> Result<Configuration, String> {
+        let whitelist = Configuration::get_whitelisted_ips(&Path::new("whitelisted_ips.conf"));
+        let accounts = Configuration::get_accounts(&Path::new("accounts.conf"));
+
+        Ok(Configuration {
+            whitelisted_ips: whitelist,
+            user_accounts: accounts,
             listen_ip: "127.0.0.1".to_string(),
             listen_port: 1080
-        };
+        })
+
     }
 
-    fn get_whitelisted_ips(file: File) -> Vec<IpAddr> {
+    fn get_whitelisted_ips(path: &Path) -> Vec<IpAddr> {
         let mut ip_vec:Vec<IpAddr> = Vec::new();
-        let mut reader = BufferedReader::new(file);
-        for line in reader.lines() {
-            match line {
-                Ok(s) => {
-                    let ip = match from_str(s.as_slice().trim()) {
-                        Some(res) => res,
-                        _ => break
-                    };
-                    ip_vec.push(ip)
-                },
-                _ => break
-            }
-        }
-        println!("Ip_vec -> {}", ip_vec);
+        let file = match File::open(path) {
+            Ok(f) => f,
+            _ => return Vec::new()
+        };
 
-        return ip_vec;
+        let mut reader = BufferedReader::new(file);
+
+        for line in reader.lines() {
+            match from_str(line.unwrap().trim()) {
+                Some(res) => ip_vec.push(res),
+                _ => break
+            };
+        }
+
+        ip_vec
+    }
+
+    fn get_accounts(path: &Path) -> Vec<User> {
+        let mut accounts:Vec<User> = Vec::new();
+        let file = match File::open(path) {
+            Ok(f) => f,
+            _ => return Vec::new()
+        };
+
+        let mut reader = BufferedReader::new(file);
+
+        for line in reader.lines() {
+            let creds:Vec<String> = line.unwrap().split(':').map(|x| { x.to_string() }).collect();
+            accounts.push(User{ username: creds[0].clone(), password_hash: creds[1].clone() });
+        }
+
+        accounts
     }
 }
-

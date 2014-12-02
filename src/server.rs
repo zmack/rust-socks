@@ -78,12 +78,7 @@ impl SocksServer {
 
             let addr = try!(self.get_remote_addr(addr_type));
 
-            println!("Process command {}", c);
-            println!("res {}", res);
-            println!("addr_type {}", addr_type);
-
             let mut outbound = try!(TcpStream::connect_timeout(addr, Duration::seconds(5)));
-            println!("Connected {}", addr);
 
             try!(self.tcp_stream.write(&[5, 0, 0, 1, 127, 0, 0, 1, 0, 0]));
 
