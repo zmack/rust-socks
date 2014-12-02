@@ -42,15 +42,16 @@ impl FromError<String> for RocksError {
 }
 
 impl SocksServer {
-    pub fn new(tcp_stream: TcpStream, trackers:ClientTrackers, logger: Logger) -> SocksServer {
-        SocksServer {
+    pub fn new(tcp_stream: TcpStream, trackers:ClientTrackers, logger: Logger) {
+        let mut server = SocksServer {
             tcp_stream: tcp_stream,
             trackers: trackers,
             logger: logger
-        }
+        };
+        server.handle_client();
     }
 
-    pub fn handle_client(&mut self) -> Result<(), RocksError> {
+    fn handle_client(&mut self) -> Result<(), RocksError> {
         loop {
             let version = try!(self.tcp_stream.read_u8());
             if version == 5 {

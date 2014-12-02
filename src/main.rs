@@ -56,7 +56,7 @@ fn main() {
             }
             Ok(stream) => {
                 spawn(proc() {
-                    SocksServer::new(stream, cloned_trackers, cloned_logger).handle_client();
+                    SocksServer::new(stream, cloned_trackers, cloned_logger);
                 })
             }
         }
