@@ -1,19 +1,21 @@
 use std::os;
 use std::{io, error};
-use std::error::FromError;
-use std::io::{TcpListener, TcpStream};
-use std::io::{Acceptor, Listener, IoError, IoResult};
-use std::io::util::copy;
-use std::io::net::addrinfo::get_host_addresses;
-use std::io::net::ip::{IpAddr, Ipv4Addr, SocketAddr};
-use std::time::duration::Duration;
+use std::convert::From;
+use std::net::{TcpListener, TcpStream, Shutdown};
+use std::io::{Error,copy};
+use std::net::lookup_host;
+use std::io::prelude::*;
+use std::net::{IpAddr, Ipv4Addr, SocketAddr, SocketAddrV4};
+use std::time::Duration;
 
 use logger::Logger;
 use client_tracker::{ClientTracker, ClientTrackers};
 use configuration::Configuration;
 
+use byteorder::{BigEndian, LittleEndian, ReadBytesExt, WriteBytesExt};
+
 enum RocksError {
-    Io(IoError),
+    Io(Error),
     Generic(String)
 }
 
@@ -21,24 +23,6 @@ pub struct SocksServer {
     trackers: ClientTrackers,
     tcp_stream: TcpStream,
     logger: Logger
-}
-
-impl FromError<IoError> for RocksError {
-    fn from_error(err: IoError) -> RocksError {
-        RocksError::Io(err)
-    }
-}
-
-impl FromError<Vec<u8>> for RocksError {
-    fn from_error(err: Vec<u8>) -> RocksError {
-        RocksError::Generic("Invalid utf encountered".to_string())
-    }
-}
-
-impl FromError<String> for RocksError {
-    fn from_error(string: String) -> RocksError {
-        RocksError::Generic(string)
-    }
 }
 
 impl SocksServer {
@@ -53,15 +37,16 @@ impl SocksServer {
 
     fn handle_client(&mut self) -> Result<(), RocksError> {
         loop {
-            let version = try!(self.tcp_stream.read_u8());
+            let version = self.tcp_stream.read_u8().unwrap();
             if version == 5 {
-                let num_methods = try!(self.tcp_stream.read_u8());
-                let methods = try!(self.tcp_stream.read_exact(num_methods as uint));
+                let num_methods = self.tcp_stream.read_u8().unwrap();
+                let mut methods = Vec::with_capacity(num_methods as usize);
+                self.tcp_stream.read_exact(&mut methods).unwrap();
 
                 if methods.contains(&2) {
                     // Authenticated
                     self.tcp_stream.write(&[5, 2]);
-                    try!(self.authenticate());
+                    self.authenticate().unwrap()
                 } else {
                     // Unauthenticated
                     self.tcp_stream.write(&[5, 0]);
@@ -71,50 +56,53 @@ impl SocksServer {
                 break
             }
 
-            let v1 = try!(self.tcp_stream.read_u8());
-            let c = try!(self.tcp_stream.read_u8());
-            let res = try!(self.tcp_stream.read_u8());
-            let addr_type = try!(self.tcp_stream.read_u8());
+            let v1 = self.tcp_stream.read_u8().unwrap();
+            let c = self.tcp_stream.read_u8().unwrap();
+            let res = self.tcp_stream.read_u8().unwrap();
+            let addr_type = self.tcp_stream.read_u8().unwrap();
 
-            let addr = try!(self.get_remote_addr(addr_type));
+            let addr = self.get_remote_addr(addr_type).unwrap();
 
-            let mut outbound = try!(TcpStream::connect_timeout(addr, Duration::seconds(5)));
+            let mut outbound = TcpStream::connect(addr).unwrap();
+            outbound.set_read_timeout(Some(Duration::from_secs(5))).unwrap();
 
-            try!(self.tcp_stream.write(&[5, 0, 0, 1, 127, 0, 0, 1, 0, 0]));
+            self.tcp_stream.write(&[5, 0, 0, 1, 127, 0, 0, 1, 0, 0]).unwrap();
 
-            let mut client_reader = self.tcp_stream.clone();
-            let mut socket_writer = outbound.clone();
+            let mut client_reader = self.tcp_stream.try_clone().unwrap();
+            let mut socket_writer = outbound.try_clone().unwrap();
 
             // Copy doesn't return total bytes copied.
             // Either roll our own moving forward or just scrap tracking
-            spawn(proc() {
+            ::std::thread::spawn(move || {
                 copy(&mut client_reader, &mut socket_writer);
-                client_reader.close_read();
-                socket_writer.close_write();
+                client_reader.shutdown(Shutdown::Read);
+                socket_writer.shutdown(Shutdown::Write);
             });
 
-            let mut socket_reader = outbound.clone();
-            let mut client_writer = self.tcp_stream.clone();
+            let mut socket_reader = outbound.try_clone().unwrap();
+            let mut client_writer = self.tcp_stream.try_clone().unwrap();
 
             copy(&mut socket_reader, &mut client_writer);
-            socket_reader.close_read();
-            client_writer.close_write();
+            socket_reader.shutdown(Shutdown::Read);
+            client_writer.shutdown(Shutdown::Write);
         }
 
         return Ok(())
     }
 
-    fn authenticate(&mut self) -> Result<(), RocksError> {
-        let version = try!(self.tcp_stream.read_u8());
+    fn authenticate(&mut self) -> Result<(), String> {
+        let version = self.tcp_stream.read_u8().unwrap();
         if version != 1 {
-            return Err(FromError::from_error("Wrong version".to_string()))
+            return Err(From::from("Wrong version".to_string()))
         }
-        let username_len = try!(self.tcp_stream.read_u8());
-        let username_bytes = try!(self.tcp_stream.read_exact(username_len as uint));
-        let username = try!(String::from_utf8(username_bytes));
-        let password_len = try!(self.tcp_stream.read_u8());
-        let password_bytes = try!(self.tcp_stream.read_exact(password_len as uint));
-        let password = try!(String::from_utf8(password_bytes));
+        let username_len = self.tcp_stream.read_u8().unwrap();
+        let mut username_vec = Vec::with_capacity(username_len as usize);
+        self.tcp_stream.read_exact(&mut username_vec);
+        let username = String::from_utf8(username_vec).unwrap();
+        let password_len = self.tcp_stream.read_u8().unwrap();
+        let mut password_vec = Vec::with_capacity(password_len as usize);
+        self.tcp_stream.read_exact(&mut password_vec).unwrap();
+        let password = String::from_utf8(password_vec).unwrap();
 
         self.trackers.track(&username);
 
@@ -126,39 +114,44 @@ impl SocksServer {
         Ok(())
     }
 
-    fn get_remote_addr(&mut self, addr_type: u8) -> Result<SocketAddr, RocksError> {
+    fn get_remote_addr(&mut self, addr_type: u8) -> Result<SocketAddr, String> {
         match addr_type {
             1 => {
-                let ip = try!(self.tcp_stream.read_exact(4));
-                let port = try!(self.tcp_stream.read_be_uint_n(2)).to_u16().unwrap();
+                let mut ip_bytes = [0u8; 4];
+                self.tcp_stream.read_exact(&mut ip_bytes);
+                let ip = Ipv4Addr::from(ip_bytes);
+                let port = self.tcp_stream.read_u16::<BigEndian>().unwrap();
 
-                return Ok(SocketAddr{ ip: Ipv4Addr(ip[0], ip[1], ip[2], ip[3]), port: port });
+                return Ok(SocketAddr::V4(SocketAddrV4::new(ip, port)));
             },
             3 => {
-                let num_str = try!(self.tcp_stream.read_u8()).to_uint().unwrap();
-                let hostname_vec = try!(self.tcp_stream.read_exact(num_str));
-                let port = try!(self.tcp_stream.read_be_uint_n(2)).to_u16().unwrap();
+                let num_str = self.tcp_stream.read_u8().unwrap();
+                let mut hostname_vec = Vec::with_capacity(num_str as usize);
+                self.tcp_stream.read_exact(&mut hostname_vec).unwrap();
+                let port = self.tcp_stream.read_u16::<BigEndian>().unwrap();
 
                 let hostname = match String::from_utf8(hostname_vec) { Ok(s) => s, _ => "".to_string() };
                 self.logger.log(&hostname);
-                let addresses = try!(resolve_addr_with_cache(hostname.as_slice()));
+                let address = resolve_addr_with_cache(&hostname).unwrap();
 
-                if addresses.is_empty() {
-                    return Err(FromError::from_error("Empty Address".to_string()))
+                if address.is_some() {
+                    return Err(From::from("Empty Address".to_string()))
                 } else {
-                    println!("Resolution succeeded for {} - {}", hostname, addresses);
-                    return Ok(SocketAddr{ ip: addresses[0], port: port });
+                    // println!("Resolution succeeded for {?} - {?}", hostname, addresses);
+                    let mut address = address.unwrap();
+                    address.set_port(port);
+                    return Ok(address);
                 }
             },
-            _ => return Err(FromError::from_error("Invalid Address Type".to_string()))
+            _ => return Err(From::from("Invalid Address Type".to_string()))
         }
     }
 }
 
 
-fn resolve_addr_with_cache(hostname: &str) -> Result<Vec<IpAddr>, String> {
-    match get_host_addresses(hostname) {
-        Ok(a) => { return Ok(a) },
+fn resolve_addr_with_cache(hostname: &str) -> Result<Option<SocketAddr>, String> {
+    match lookup_host(hostname) {
+        Ok(a) => { return Ok(a.nth(0)) },
         _ => { return Err("Done with this".to_string()) }
     };
 }

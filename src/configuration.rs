@@ -1,6 +1,9 @@
-use std::io::File;
-use std::io::BufferedReader;
-use std::io::net::ip::{IpAddr, Ipv4Addr, SocketAddr};
+use std::fs::File;
+use std::io::BufReader;
+use std::path::Path;
+use std::str::FromStr;
+use std::io::prelude::*;
+use std::net::{IpAddr, Ipv4Addr, SocketAddr};
 
 pub struct User {
     username: String,
@@ -49,11 +52,11 @@ impl Configuration {
             _ => return Vec::new()
         };
 
-        let mut reader = BufferedReader::new(file);
+        let mut reader = BufReader::new(file);
 
         for line in reader.lines() {
-            match from_str(line.unwrap().trim()) {
-                Some(res) => ip_vec.push(res),
+            match IpAddr::from_str(line.unwrap().trim()) {
+                Ok(res) => ip_vec.push(res),
                 _ => break
             };
         }
@@ -68,7 +71,7 @@ impl Configuration {
             _ => return Vec::new()
         };
 
-        let mut reader = BufferedReader::new(file);
+        let mut reader = BufReader::new(file);
 
         for line in reader.lines() {
             let creds:Vec<String> = line.unwrap().split(':').map(|x| { x.to_string() }).collect();

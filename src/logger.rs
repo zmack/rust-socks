@@ -1,11 +1,13 @@
-use std::comm::{Sender, Receiver};
-use std::io::File;
+use std::io::prelude::*;
+use std::sync::mpsc::{Sender, Receiver, channel};
+use std::path::Path;
+use std::fs::File;
 
 enum Msg {
     Log(String)
 }
 
-#[deriving(Clone)]
+#[derive(Clone)]
 pub struct Logger {
     sender: Sender<Msg>,
 }
@@ -13,7 +15,7 @@ pub struct Logger {
 impl Logger {
     pub fn new() -> Logger {
         let (tx, rx) = channel();
-        spawn(proc() {
+        ::std::thread::spawn(move || {
             Logger::perform_logging(rx);
         });
         return Logger {
@@ -26,12 +28,12 @@ impl Logger {
     }
 
     fn perform_logging(rx: Receiver<Msg>) {
-        let mut file = File::create(&Path::new("urls.txt"));
+        let mut file = File::create(&Path::new("urls.txt")).unwrap();
         loop {
             match rx.recv() {
-                Msg::Log(message) => {
+                Ok(Msg::Log(message)) => {
                     println!("Got {}", message);
-                    file.write_line(message.as_slice());
+                    file.write(&message.into_bytes());
                 }
             }
         }

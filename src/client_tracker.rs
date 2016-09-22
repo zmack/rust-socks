@@ -1,5 +1,5 @@
-use std::comm::{Sender, Receiver};
-use std::io::File;
+use std::sync::mpsc::{Sender, Receiver, channel};
+use std::fs::File;
 use std::collections::HashMap;
 
 enum Msg {
@@ -10,14 +10,14 @@ enum ClientTrackersMsg {
     Get(String),
 }
 
-#[deriving(Clone)]
+#[derive(Clone)]
 pub struct ClientTracker {
     client: String,
     total_traffic: u64,
     sender: Sender<Msg>
 }
 
-#[deriving(Clone)]
+#[derive(Clone)]
 pub struct ClientTrackers {
     sender: Sender<ClientTrackersMsg>
 }
@@ -26,7 +26,7 @@ impl ClientTrackers {
     pub fn new() -> ClientTrackers {
         let (tx, rx) = channel();
 
-        spawn(proc() {
+        ::std::thread::spawn(move || {
             ClientTrackers::serve(rx);
         });
 
@@ -40,7 +40,7 @@ impl ClientTrackers {
 
         loop {
             match rx.recv() {
-                ClientTrackersMsg::Get(key) => {
+                Ok(ClientTrackersMsg::Get(key)) => {
                     let tracker = trackers.get(key);
                     tracker.increment();
                 }
@@ -70,7 +70,7 @@ impl ClientTrackersInner {
     pub fn get(&mut self, client: String) -> ClientTracker {
         let trackers = &self.trackers.clone();
         let client_key = client.clone();
-        let found_tracker = trackers.find(&client.clone());
+        let found_tracker = trackers.get(&client.clone());
         match found_tracker {
             Some(c) => return (*c).clone(),
             _ => {

@@ -3,3 +3,6 @@
 name = "rust-socks"
 version = "0.0.1"
 authors = [ "Andrei Bocan" ]
+
+[dependencies]
+byteorder = "0.5"
