@@ -1,58 +1,64 @@
-use std::io::net::addrinfo::get_host_addresses;
-use std::io::net::ip::{IpAddr, Ipv4Addr, SocketAddr};
-use std::comm::{Sender, Receiver};
-use std::io::File;
-use std::sync::{Arc, Mutex};
-use std::fmt;
+use std::net::lookup_host;
+use std::net::{SocketAddr};
+use std::collections::HashMap;
+use std::sync::mpsc::{Sender, Receiver, channel};
+use std::thread;
 
-
-#[deriving(Clone)]
-struct ExecutionPool {
-    sender: Sender<proc():Send>
+#[derive(Clone)]
+pub struct DnsCache {
+    tx: Sender<ResolveRequest>
 }
 
-impl ExecutionPool {
-    pub fn new(size: uint) -> ExecutionPool {
-        let (tx, rx) = channel::<proc():Send>();
-        let receiver = Arc::new(Mutex::new(rx));
-
-        for i in range(0u, size) {
-            let cloned_rx = receiver.clone();
-            let thread_id = i.clone();
-
-            spawn(proc() {
-                loop {
-                    match cloned_rx.lock().recv_opt() {
-                        Ok(x) => {
-                            x();
-                        },
-                        _ => {},
-                    }
-                }
-            });
-        }
-
-        ExecutionPool {
-            sender: tx
-        }
-    }
-
-    pub fn exec(&self, fun:proc():Send) {
-        self.sender.send(fun);
-    }
+struct ResolveRequest {
+    hostname: String,
+    tx: Sender<ResolveResponse>
 }
 
-fn main() {
-    let pool = ExecutionPool::new(10);
+struct ResolveResponse {
+    addr: Option<SocketAddr>
+}
 
-    for i in range(1u, 1_000u) {
-        let (tx, rx) = channel::<uint>();
-        pool.exec(proc() {
-            println!("Hello");
-            tx.send(10);
+impl DnsCache {
+    pub fn new() -> DnsCache {
+        let (tx, rx) = channel::<ResolveRequest>();
+
+        let mut cache = DnsCache {
+            tx: tx
+        };
+
+        let mut store = HashMap::new();
+
+        thread::spawn(move || {
+            handle_message(store, rx);
         });
 
-        println!("Done with {} -> {}", i, rx.recv());
+        cache
+    }
+
+    pub fn resolve(&self, hostname: &str) -> Option<SocketAddr> {
+        let (tx, rx) = channel::<ResolveResponse>();
+        let request = ResolveRequest { hostname: hostname.to_string(), tx: tx };
+        self.tx.send(request);
+        rx.recv().unwrap().addr
     }
 }
 
+fn handle_message(mut store: HashMap<String, Option<SocketAddr>>, rx: Receiver<ResolveRequest>) {
+    loop {
+        let message;
+        match rx.recv() {
+            Ok(m) => { message = m },
+            _ => continue
+        };
+
+        let hostname = message.hostname;
+        let value = store.entry(hostname.clone()).or_insert_with(move || {
+            match lookup_host(&hostname) {
+                Ok(mut a) => { a.nth(0) },
+                _ => { None }
+            }
+        });
+        message.tx.send(ResolveResponse { addr: *value });
+    }
+
+}

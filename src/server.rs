@@ -5,12 +5,12 @@ use std::{io, error};
 use std::convert::From;
 use std::net::{TcpListener, TcpStream, Shutdown};
 use std::io::{Error,copy};
-use std::net::lookup_host;
 use std::io::prelude::*;
 use std::net::{IpAddr, Ipv4Addr, SocketAddr, SocketAddrV4};
 use std::time::Duration;
 
 use logger::Logger;
+use dns_cache::DnsCache;
 use client_tracker::{ClientTracker, ClientTrackers};
 use configuration::Configuration;
 
@@ -24,14 +24,16 @@ enum RocksError {
 pub struct SocksServer {
     trackers: ClientTrackers,
     tcp_stream: TcpStream,
-    logger: Logger
+    logger: Logger,
+    dns: DnsCache,
 }
 
 impl SocksServer {
-    pub fn new(tcp_stream: TcpStream, trackers:ClientTrackers, logger: Logger) {
+    pub fn new(tcp_stream: TcpStream, trackers:ClientTrackers, logger: Logger, dns: DnsCache) {
         let mut server = SocksServer {
             tcp_stream: tcp_stream,
             trackers: trackers,
+            dns: dns,
             logger: logger
         };
         server.handle_client();
@@ -42,7 +44,7 @@ impl SocksServer {
             let version;
             match self.tcp_stream.read_u8() {
                 Ok(v) => { version = v },
-                _ => continue
+                _ => break
             }
             if version == 5 {
                 let num_methods = self.tcp_stream.read_u8().unwrap();
@@ -150,7 +152,7 @@ impl SocksServer {
 
                 let hostname = match String::from_utf8(hostname_vec) { Ok(s) => s, _ => "".to_string() };
                 self.logger.log(hostname.clone());
-                let address = resolve_addr_with_cache(&hostname).unwrap();
+                let address = self.resolve_addr_with_cache(&hostname);
 
                 if address.is_none() {
                     return Err(From::from("Empty Address".to_string()))
@@ -164,12 +166,10 @@ impl SocksServer {
             _ => return Err(From::from("Invalid Address Type".to_string()))
         }
     }
+
+    fn resolve_addr_with_cache(&self, hostname: &str) -> Option<SocketAddr> {
+        self.dns.resolve(hostname)
+    }
 }
 
 
-fn resolve_addr_with_cache(hostname: &str) -> Result<Option<SocketAddr>, String> {
-    match lookup_host(hostname) {
-        Ok(mut a) => { return Ok(a.nth(0)) },
-        _ => { return Err("Done with this".to_string()) }
-    };
-}

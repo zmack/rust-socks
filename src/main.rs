@@ -13,8 +13,10 @@ use server::SocksServer;
 use configuration::Configuration;
 use logger::Logger;
 use client_tracker::{ClientTracker, ClientTrackers};
+use dns_cache::DnsCache;
 
 mod logger;
+mod dns_cache;
 mod configuration;
 mod client_tracker;
 mod server;
@@ -46,17 +48,19 @@ fn main() {
     println!("Listening on {:?}", socket_name);
     let logger = Logger::new();
     let trackers = ClientTrackers::new();
+    let dns = DnsCache::new();
 
     loop {
         let cloned_logger = logger.clone();
         let cloned_trackers = trackers.clone();
+        let cloned_dns = dns.clone();
         match listener.accept() {
             Err(e) => {
                 println!("There was an error omg {}", e)
             }
             Ok((stream, remote)) => {
                 spawn(move || {
-                    SocksServer::new(stream, cloned_trackers, cloned_logger);
+                    SocksServer::new(stream, cloned_trackers, cloned_logger, cloned_dns);
                 });
             }
         }
