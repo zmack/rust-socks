@@ -23,8 +23,8 @@ impl Logger {
         }
     }
 
-    pub fn log(&self, message: &String) {
-        self.sender.send(Msg::Log(message.clone()));
+    pub fn log(&self, message: String) {
+        self.sender.send(Msg::Log(message));
     }
 
     fn perform_logging(rx: Receiver<Msg>) {
@@ -34,7 +34,8 @@ impl Logger {
                 Ok(Msg::Log(message)) => {
                     println!("Got {}", message);
                     file.write(&message.into_bytes());
-                }
+                },
+                Err(_) => {}
             }
         }
         file.flush();

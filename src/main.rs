@@ -1,12 +1,13 @@
+#![feature(lookup_host)]
+
+#[macro_use]
+extern crate log;
+
 use std::os;
 use std::{io, error};
-use std::error::FromError;
-use std::io::{TcpListener, TcpStream};
-use std::io::{Acceptor, Listener, IoError, IoResult};
-use std::io::util::copy;
-use std::io::net::addrinfo::get_host_addresses;
-use std::io::net::ip::{IpAddr, Ipv4Addr, SocketAddr};
-use std::time::duration::Duration;
+use std::net::{TcpListener, TcpStream};
+use std::time::Duration;
+use std::thread::spawn;
 
 use server::SocksServer;
 use configuration::Configuration;
@@ -19,48 +20,45 @@ mod client_tracker;
 mod server;
 
 fn main() {
-    let args = os::args();
+    let args = std::env::args();
     let bind_address:&str;
 
+    /*
     match args.len() {
         2 => {
-            bind_address = args[1].as_slice();
+            bind_address = &args.nth(1).unwrap();
         },
         _ => {
             bind_address = "127.0.0.1";
         },
     };
+    */
     let configuration = Configuration::new();
-    println!("whitelist -> {}", configuration.whitelisted_ips);
-    println!("{} <-", os::args());
-    let mut listener = TcpListener::bind(bind_address).unwrap();
-    let socket_name = match listener.socket_name() {
+    println!("whitelist -> {:?}", configuration.whitelisted_ips);
+    let mut listener = TcpListener::bind("127.0.0.1:1090").unwrap();
+    let socket_name = match listener.local_addr() {
         Ok(s) => s,
         _ => {
             println!("Error getting socket name");
             return
         }
     };
-    println!("Listening on {}", socket_name);
+    println!("Listening on {:?}", socket_name);
     let logger = Logger::new();
     let trackers = ClientTrackers::new();
 
-    let mut acceptor = listener.listen();
-
-    for stream in acceptor.incoming() {
+    loop {
         let cloned_logger = logger.clone();
         let cloned_trackers = trackers.clone();
-        match stream {
+        match listener.accept() {
             Err(e) => {
                 println!("There was an error omg {}", e)
             }
-            Ok(stream) => {
-                spawn(proc() {
+            Ok((stream, remote)) => {
+                spawn(move || {
                     SocksServer::new(stream, cloned_trackers, cloned_logger);
-                })
+                });
             }
         }
     }
-
-    drop(acceptor);
 }

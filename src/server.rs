@@ -1,3 +1,5 @@
+extern crate byteorder;
+
 use std::os;
 use std::{io, error};
 use std::convert::From;
@@ -12,7 +14,7 @@ use logger::Logger;
 use client_tracker::{ClientTracker, ClientTrackers};
 use configuration::Configuration;
 
-use byteorder::{BigEndian, LittleEndian, ReadBytesExt, WriteBytesExt};
+use server::byteorder::{BigEndian, LittleEndian, ReadBytesExt, WriteBytesExt};
 
 enum RocksError {
     Io(Error),
@@ -37,11 +39,17 @@ impl SocksServer {
 
     fn handle_client(&mut self) -> Result<(), RocksError> {
         loop {
-            let version = self.tcp_stream.read_u8().unwrap();
+            let version;
+            match self.tcp_stream.read_u8() {
+                Ok(v) => { version = v },
+                _ => continue
+            }
             if version == 5 {
                 let num_methods = self.tcp_stream.read_u8().unwrap();
                 let mut methods = Vec::with_capacity(num_methods as usize);
+                unsafe { methods.set_len(num_methods as usize) };
                 self.tcp_stream.read_exact(&mut methods).unwrap();
+                debug!("num_methods is {:?}, methods is {:?}", num_methods, methods);
 
                 if methods.contains(&2) {
                     // Authenticated
@@ -61,15 +69,24 @@ impl SocksServer {
             let res = self.tcp_stream.read_u8().unwrap();
             let addr_type = self.tcp_stream.read_u8().unwrap();
 
+            debug!("v1 is {:?}", v1);
+            debug!("c is {:?}", c);
+            debug!("res is {:?}", res);
+            debug!("Address type is {:?}", addr_type);
             let addr = self.get_remote_addr(addr_type).unwrap();
+
+            debug!("Address is {:?}", addr);
 
             let mut outbound = TcpStream::connect(addr).unwrap();
             outbound.set_read_timeout(Some(Duration::from_secs(5))).unwrap();
 
             self.tcp_stream.write(&[5, 0, 0, 1, 127, 0, 0, 1, 0, 0]).unwrap();
+            debug!("Wrote things");
 
             let mut client_reader = self.tcp_stream.try_clone().unwrap();
+            debug!("Clone reader");
             let mut socket_writer = outbound.try_clone().unwrap();
+            debug!("Clone writer");
 
             // Copy doesn't return total bytes copied.
             // Either roll our own moving forward or just scrap tracking
@@ -109,7 +126,7 @@ impl SocksServer {
         // Success
         self.tcp_stream.write(&[1, 0]);
 
-        println!("Authentication credentials {} {}", username, password);
+        debug!("Authentication credentials {} {}", username, password);
 
         Ok(())
     }
@@ -127,14 +144,15 @@ impl SocksServer {
             3 => {
                 let num_str = self.tcp_stream.read_u8().unwrap();
                 let mut hostname_vec = Vec::with_capacity(num_str as usize);
+                unsafe { hostname_vec.set_len(num_str as usize) };
                 self.tcp_stream.read_exact(&mut hostname_vec).unwrap();
                 let port = self.tcp_stream.read_u16::<BigEndian>().unwrap();
 
                 let hostname = match String::from_utf8(hostname_vec) { Ok(s) => s, _ => "".to_string() };
-                self.logger.log(&hostname);
+                self.logger.log(hostname.clone());
                 let address = resolve_addr_with_cache(&hostname).unwrap();
 
-                if address.is_some() {
+                if address.is_none() {
                     return Err(From::from("Empty Address".to_string()))
                 } else {
                     // println!("Resolution succeeded for {?} - {?}", hostname, addresses);
@@ -151,7 +169,7 @@ impl SocksServer {
 
 fn resolve_addr_with_cache(hostname: &str) -> Result<Option<SocketAddr>, String> {
     match lookup_host(hostname) {
-        Ok(a) => { return Ok(a.nth(0)) },
+        Ok(mut a) => { return Ok(a.nth(0)) },
         _ => { return Err("Done with this".to_string()) }
     };
 }

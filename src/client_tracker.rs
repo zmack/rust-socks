@@ -43,7 +43,8 @@ impl ClientTrackers {
                 Ok(ClientTrackersMsg::Get(key)) => {
                     let tracker = trackers.get(key);
                     tracker.increment();
-                }
+                },
+                Err(_) => {}
             }
         }
     }
